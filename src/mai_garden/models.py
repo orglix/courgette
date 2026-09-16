@@ -11,7 +11,8 @@ Quatre entités :
 from datetime import date, datetime
 from enum import Enum
 
-from sqlmodel import JSON, Column, Field, Relationship, SQLModel
+from sqlalchemy import ARRAY, Integer
+from sqlmodel import Column, Field, Relationship, SQLModel
 
 
 # --------------------------------------------------------------------------- #
@@ -66,10 +67,25 @@ class Espece(SQLModel, table=True):
         default=None, description="Nombre de jours recommandé entre deux arrosages."
     )
 
-    # Mois stockés en entiers 1-12. JSON simple pour l'instant, suffisant en Phase 1.
-    mois_semis: list[int] = Field(default_factory=list, sa_column=Column(JSON))
-    mois_plantation: list[int] = Field(default_factory=list, sa_column=Column(JSON))
-    mois_recolte: list[int] = Field(default_factory=list, sa_column=Column(JSON))
+    # Mois stockés en entiers 1-12, en tableau natif Postgres (indexable en GIN,
+    # bien plus efficace à filtrer en masse qu'un JSON une fois le référentiel volumineux).
+    mois_semis: list[int] = Field(
+        default_factory=list, sa_column=Column(ARRAY(Integer), nullable=False, server_default="{}")
+    )
+    mois_plantation: list[int] = Field(
+        default_factory=list, sa_column=Column(ARRAY(Integer), nullable=False, server_default="{}")
+    )
+    mois_recolte: list[int] = Field(
+        default_factory=list, sa_column=Column(ARRAY(Integer), nullable=False, server_default="{}")
+    )
+    mois_taille: list[int] = Field(
+        default_factory=list, sa_column=Column(ARRAY(Integer), nullable=False, server_default="{}")
+    )
+    mois_bouturage: list[int] | None = Field(
+        default=None,
+        sa_column=Column(ARRAY(Integer), nullable=True),
+        description="Mois où le bouturage est possible. None si non applicable à l'espèce.",
+    )
 
     duree_recolte_jours: int | None = Field(
         default=None, description="Durée approximative entre plantation et récolte."
