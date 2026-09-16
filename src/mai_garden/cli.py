@@ -13,8 +13,8 @@ from datetime import date
 import typer
 from sqlmodel import Session, select
 
-from db import create_db_and_tables, engine
-from models import Emplacement, Espece, Exposition, PlanteJardin, StatutPlante
+from mai_garden.db import create_db_and_tables, engine
+from mai_garden.models import Emplacement, Espece, Exposition, PlanteJardin, StatutPlante
 
 app = typer.Typer(help="Assistant de gestion du jardin.")
 espece_app = typer.Typer(help="Gérer le référentiel d'espèces.")

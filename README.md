@@ -58,6 +58,9 @@ Les fonctionnalités à venir (météo, chatbot IA, identification par photo, ag
 ## Utilisation
 
 ```bash
+# Creation base de donnée
+uv run jardin init-db
+
 # Ajouter une espèce au référentiel
 uv run jardin espece ajouter
 
