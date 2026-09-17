@@ -8,39 +8,53 @@ Usage :
     uv run python cli.py plante lister
 """
 
-from datetime import date
+from datetime import date, datetime
 
 import typer
 from sqlmodel import Session, select
 
 from mai_garden.db import create_db_and_tables, engine
-from mai_garden.models import Emplacement, Espece, Exposition, PlanteJardin, StatutPlante
+from mai_garden.models import (
+    Emplacement,
+    Espece,
+    Evenement,
+    Exposition,
+    PlanteJardin,
+    StatutPlante,
+    TypeEvenement,
+)
+from mai_garden.rappels import taches_du_jour
+
 
 app = typer.Typer(help="Assistant de gestion du jardin.")
 espece_app = typer.Typer(help="Gérer le référentiel d'espèces.")
 plante_app = typer.Typer(help="Gérer les plantes de ton jardin.")
+evenement_app = typer.Typer(help="Gérer le journal d'événements (arrosage, taille, récolte...).")
+rappel_app = typer.Typer(help="Voir les tâches dues.")
 app.add_typer(espece_app, name="espece")
 app.add_typer(plante_app, name="plante")
-
-
+app.add_typer(evenement_app, name="evenement")
+app.add_typer(rappel_app, name="rappel")
+ 
+ 
 def _parse_mois(valeur: str | None) -> list[int]:
     """Parse une liste de mois séparés par des virgules, ex. '3,4,5' -> [3, 4, 5]."""
     if not valeur:
         return []
     return [int(m.strip()) for m in valeur.split(",") if m.strip()]
-
-
+ 
+ 
 @app.command("init-db")
 def init_db():
     """Crée les tables en base si elles n'existent pas encore."""
     create_db_and_tables()
     typer.echo("Tables créées (ou déjà existantes).")
-
-
+ 
+ 
 # --------------------------------------------------------------------------- #
 # Espece
 # --------------------------------------------------------------------------- #
-
+ 
 @espece_app.command("ajouter")
 def espece_ajouter(
     nom: str,
@@ -70,8 +84,8 @@ def espece_ajouter(
         session.commit()
         session.refresh(espece)
     typer.echo(f"Espèce '{espece.nom}' ajoutée (id={espece.id}).")
-
-
+ 
+ 
 @espece_app.command("lister")
 def espece_lister():
     """Liste toutes les espèces du référentiel."""
@@ -86,18 +100,19 @@ def espece_lister():
             f"— arrosage tous les {e.frequence_arrosage_jours or '?'} j "
             f"— semis: {e.mois_semis or '?'} — récolte: {e.mois_recolte or '?'}"
         )
-
-
+ 
+ 
 # --------------------------------------------------------------------------- #
 # PlanteJardin
 # --------------------------------------------------------------------------- #
-
+ 
 @plante_app.command("ajouter")
 def plante_ajouter(
     espece_id: int,
     emplacement: Emplacement = typer.Option(Emplacement.EXTERIEUR),
     zone: str = typer.Option(None, help="Ex. 'potager nord', 'salon'."),
-    date_plantation: str = typer.Option(str(date.today()), help="Format AAAA-MM-JJ."),
+    date_plantation: str = typer.Option(None, help="Format AAAA-MM-JJ. Omis si date inconnue."),
+    quantite: int = typer.Option(1, help="Nombre de pieds plantés ensemble."),
     statut: StatutPlante = typer.Option(StatutPlante.SEMIS),
 ):
     """Ajoute une plante à ton jardin, liée à une espèce existante du référentiel."""
@@ -106,22 +121,23 @@ def plante_ajouter(
         if espece is None:
             typer.echo(f"Aucune espèce avec l'id {espece_id}. Utilise 'espece lister' pour voir les id valides.")
             raise typer.Exit(code=1)
-
+ 
         plante = PlanteJardin(
             espece_id=espece_id,
             emplacement=emplacement,
             zone=zone,
-            date_plantation=date.fromisoformat(date_plantation),
+            date_plantation=date.fromisoformat(date_plantation) if date_plantation else None,
+            quantite=quantite,
             statut=statut,
         )
         session.add(plante)
         session.commit()
         session.refresh(plante)
         nom_espece = espece.nom
-
-    typer.echo(f"Plante ajoutée (id={plante.id}) — {nom_espece} en {emplacement.value}.")
-
-
+ 
+    typer.echo(f"Plante ajoutée (id={plante.id}) — {quantite}x {nom_espece} en {emplacement.value}.")
+ 
+ 
 @plante_app.command("lister")
 def plante_lister():
     """Liste les plantes du jardin avec le nom de leur espèce."""
@@ -132,12 +148,94 @@ def plante_lister():
             raise typer.Exit()
         for p in plantes:
             espece = session.get(Espece, p.espece_id)
+            date_affichee = p.date_plantation if p.date_plantation else "date inconnue"
             typer.echo(
-                f"[{p.id}] {espece.nom if espece else '?'} — {p.emplacement.value} "
-                f"({p.zone or 'zone non précisée'}) — planté le {p.date_plantation} "
+                f"[{p.id}] {p.quantite}x {espece.nom if espece else '?'} — {p.emplacement.value} "
+                f"({p.zone or 'zone non précisée'}) — planté le {date_affichee} "
                 f"— statut: {p.statut.value}"
             )
-
-
+ 
+ 
+# --------------------------------------------------------------------------- #
+# Evenement
+# --------------------------------------------------------------------------- #
+ 
+@evenement_app.command("ajouter")
+def evenement_ajouter(
+    plante_jardin_id: int,
+    type: TypeEvenement = typer.Argument(..., help="arrosage, taille, traitement, recolte ou autre."),
+    note: str = typer.Option(None, help="Note libre, ex. 'sol encore humide, arrosage léger'."),
+    date_evenement: str = typer.Option(
+        None, "--date", help="Format AAAA-MM-JJ HH:MM. Par défaut : maintenant."
+    ),
+):
+    """Enregistre un événement (arrosage, taille, traitement, récolte) sur une plante."""
+    with Session(engine) as session:
+        plante = session.get(PlanteJardin, plante_jardin_id)
+        if plante is None:
+            typer.echo(
+                f"Aucune plante avec l'id {plante_jardin_id}. Utilise 'plante lister' pour voir les id valides."
+            )
+            raise typer.Exit(code=1)
+ 
+        evenement = Evenement(
+            plante_jardin_id=plante_jardin_id,
+            type=type,
+            date=datetime.fromisoformat(date_evenement) if date_evenement else datetime.utcnow(),
+            note=note,
+        )
+        session.add(evenement)
+        session.commit()
+        session.refresh(evenement)
+ 
+    typer.echo(f"Événement '{type.value}' enregistré (id={evenement.id}) pour la plante {plante_jardin_id}.")
+ 
+ 
+@evenement_app.command("lister")
+def evenement_lister(plante_jardin_id: int):
+    """Liste l'historique des événements d'une plante, du plus récent au plus ancien."""
+    with Session(engine) as session:
+        plante = session.get(PlanteJardin, plante_jardin_id)
+        if plante is None:
+            typer.echo(f"Aucune plante avec l'id {plante_jardin_id}.")
+            raise typer.Exit(code=1)
+ 
+        evenements = session.exec(
+            select(Evenement)
+            .where(Evenement.plante_jardin_id == plante_jardin_id)
+            .order_by(Evenement.date.desc())
+        ).all()
+ 
+    if not evenements:
+        typer.echo("Aucun événement enregistré pour cette plante.")
+        raise typer.Exit()
+ 
+    for e in evenements:
+        note_suffixe = f" — {e.note}" if e.note else ""
+        typer.echo(f"[{e.id}] {e.date:%Y-%m-%d %H:%M} — {e.type.value}{note_suffixe}")
+ 
+ 
+# --------------------------------------------------------------------------- #
+# Rappel — todo du jour
+# --------------------------------------------------------------------------- #
+ 
+@rappel_app.command("aujourdhui")
+def rappel_aujourdhui():
+    """Affiche les tâches dues aujourd'hui (arrosage + calendrier)."""
+    with Session(engine) as session:
+        taches = taches_du_jour(session)
+ 
+    if not taches:
+        typer.echo("Rien à faire aujourd'hui.")
+        raise typer.Exit()
+ 
+    for t in taches:
+        typer.echo(
+            f"[plante {t['plante_jardin_id']}] {t['type']} — {t['quantite']}x {t['espece_nom']} "
+            f"({t['zone'] or t['emplacement']})"
+        )
+ 
+ 
 if __name__ == "__main__":
     app()
+ 

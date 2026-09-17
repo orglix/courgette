@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>Jardin Assistant</title>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 700px; margin: 2rem auto; padding: 0 1rem; color: #222; }
+  h1 { font-size: 1.4rem; }
+  h2 { font-size: 1.1rem; margin-top: 2rem; border-bottom: 1px solid #ddd; padding-bottom: .3rem; }
+  form { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; margin: .8rem 0; }
+  label { font-size: .85rem; color: #555; }
+  select, input, button { padding: .35rem .5rem; font-size: .95rem; }
+  button { cursor: pointer; }
+  .plante { border: 1px solid #ddd; border-radius: 8px; padding: .8rem; margin-bottom: .8rem; }
+  .plante-titre { font-weight: 600; }
+  .plante-meta { font-size: .85rem; color: #666; margin: .2rem 0 .6rem; }
+  .evenement-form { display: flex; gap: .4rem; flex-wrap: wrap; }
+  .historique { margin-top: .6rem; font-size: .85rem; color: #444; }
+  .historique ul { margin: .3rem 0; padding-left: 1.2rem; }
+  .msg { font-size: .85rem; margin-left: .5rem; }
+  .msg.ok { color: #1a7a1a; }
+  .msg.err { color: #b00; }
+</style>
+</head>
+<body>
+
+<h1>🌱 Jardin Assistant</h1>
+
+<h2>Aujourd'hui</h2>
+<div id="liste-todo">Chargement…</div>
+
+<h2>Ajouter une plante</h2>
+<form id="form-plante">
+  <label>Espèce
+    <select id="espece_id" required></select>
+  </label>
+  <label>Emplacement
+    <select id="emplacement">
+      <option value="exterieur">Extérieur</option>
+      <option value="interieur">Intérieur</option>
+    </select>
+  </label>
+  <label>Quantité
+    <input id="quantite" type="number" min="1" value="1" style="width:4rem">
+  </label>
+  <label>Zone
+    <input id="zone" type="text" placeholder="ex. potager nord">
+  </label>
+  <label>Date de plantation (optionnel)
+    <input id="date_plantation" type="date">
+  </label>
+  <button type="submit">Ajouter</button>
+  <span class="msg" id="msg-plante"></span>
+</form>
+
+<h2>Mes plantes</h2>
+<div id="liste-plantes">Chargement…</div>
+
+<script>
+async function chargerTodo() {
+  const res = await fetch("/api/todo");
+  const taches = await res.json();
+  const conteneur = document.getElementById("liste-todo");
+
+  if (taches.length === 0) {
+    conteneur.innerHTML = "<p>Rien à faire aujourd'hui 🎉</p>";
+    return;
+  }
+
+  conteneur.innerHTML = taches.map((t, i) => `
+    <div class="plante">
+      <div class="plante-titre">${libelleEvenement(t.type)} — ${t.quantite}x ${t.espece_nom}</div>
+      <div class="plante-meta">${t.zone || (t.emplacement === "exterieur" ? "Extérieur" : "Intérieur")}</div>
+      <button type="button" onclick="marquerFait(${t.plante_jardin_id}, '${t.type}', this)">Fait ✓</button>
+    </div>
+  `).join("");
+}
+
+async function marquerFait(planteId, type, bouton) {
+  bouton.disabled = true;
+  const res = await fetch(`/api/plantes/${planteId}/evenements`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ type: type, note: null }),
+  });
+  if (res.ok) {
+    chargerTodo();
+  } else {
+    bouton.disabled = false;
+    bouton.textContent = "Erreur, réessayer";
+  }
+}
+
+async function chargerEspeces() {
+  const res = await fetch("/api/especes");
+  const especes = await res.json();
+  const select = document.getElementById("espece_id");
+  select.innerHTML = especes.map(e => `<option value="${e.id}">${e.nom}</option>`).join("");
+}
+
+function libelleStatut(statut) {
+  return { semis: "Semis", croissance: "En croissance", recolte: "En récolte", terminee: "Terminée" }[statut] || statut;
+}
+
+function libelleEvenement(type) {
+  return { arrosage: "Arrosage", taille: "Taille", traitement: "Traitement", recolte: "Récolte", autre: "Autre" }[type] || type;
+}
+
+async function chargerPlantes() {
+  const res = await fetch("/api/plantes");
+  const plantes = await res.json();
+  const conteneur = document.getElementById("liste-plantes");
+
+  if (plantes.length === 0) {
+    conteneur.innerHTML = "<p>Aucune plante enregistrée pour l'instant.</p>";
+    return;
+  }
+
+  conteneur.innerHTML = plantes.map(p => `
+    <div class="plante" data-id="${p.id}">
+      <div class="plante-titre">${p.quantite}x ${p.espece_nom}</div>
+      <div class="plante-meta">
+        ${p.emplacement === "exterieur" ? "Extérieur" : "Intérieur"}
+        ${p.zone ? " — " + p.zone : ""}
+        — planté le ${p.date_plantation || "date inconnue"}
+        — ${libelleStatut(p.statut)}
+      </div>
+      <form class="evenement-form" onsubmit="ajouterEvenement(event, ${p.id})">
+        <select name="type">
+          <option value="arrosage">Arrosage</option>
+          <option value="taille">Taille</option>
+          <option value="traitement">Traitement</option>
+          <option value="recolte">Récolte</option>
+          <option value="autre">Autre</option>
+        </select>
+        <input name="note" type="text" placeholder="note (optionnel)">
+        <button type="submit">Enregistrer</button>
+        <span class="msg" id="msg-evenement-${p.id}"></span>
+      </form>
+      <button type="button" onclick="toggleHistorique(${p.id})">Historique</button>
+      <div class="historique" id="historique-${p.id}" style="display:none"></div>
+    </div>
+  `).join("");
+}
+
+async function ajouterPlante(event) {
+  event.preventDefault();
+  const payload = {
+    espece_id: parseInt(document.getElementById("espece_id").value, 10),
+    emplacement: document.getElementById("emplacement").value,
+    zone: document.getElementById("zone").value || null,
+    date_plantation: document.getElementById("date_plantation").value || null,
+    quantite: parseInt(document.getElementById("quantite").value, 10) || 1,
+  };
+  const msg = document.getElementById("msg-plante");
+  const res = await fetch("/api/plantes", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (res.ok) {
+    msg.textContent = "Ajoutée ✓";
+    msg.className = "msg ok";
+    document.getElementById("form-plante").reset();
+    chargerPlantes();
+  } else {
+    msg.textContent = "Erreur";
+    msg.className = "msg err";
+  }
+}
+
+async function ajouterEvenement(event, planteId) {
+  event.preventDefault();
+  const form = event.target;
+  const payload = {
+    type: form.type.value,
+    note: form.note.value || null,
+  };
+  const msg = document.getElementById(`msg-evenement-${planteId}`);
+  const res = await fetch(`/api/plantes/${planteId}/evenements`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (res.ok) {
+    msg.textContent = "Enregistré ✓";
+    msg.className = "msg ok";
+    form.reset();
+    const historique = document.getElementById(`historique-${planteId}`);
+    if (historique.style.display !== "none") chargerHistorique(planteId);
+  } else {
+    msg.textContent = "Erreur";
+    msg.className = "msg err";
+  }
+}
+
+async function chargerHistorique(planteId) {
+  const res = await fetch(`/api/plantes/${planteId}/evenements`);
+  const evenements = await res.json();
+  const conteneur = document.getElementById(`historique-${planteId}`);
+  if (evenements.length === 0) {
+    conteneur.innerHTML = "<em>Aucun événement enregistré.</em>";
+    return;
+  }
+  conteneur.innerHTML = "<ul>" + evenements.map(e =>
+    `<li>${e.date.slice(0, 16).replace("T", " ")} — ${libelleEvenement(e.type)}${e.note ? " — " + e.note : ""}</li>`
+  ).join("") + "</ul>";
+}
+
+function toggleHistorique(planteId) {
+  const conteneur = document.getElementById(`historique-${planteId}`);
+  const visible = conteneur.style.display !== "none";
+  conteneur.style.display = visible ? "none" : "block";
+  if (!visible) chargerHistorique(planteId);
+}
+
+document.getElementById("form-plante").addEventListener("submit", ajouterPlante);
+chargerTodo();
+chargerEspeces();
+chargerPlantes();
+</script>
+</body>
+</html>
