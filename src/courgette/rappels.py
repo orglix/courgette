@@ -11,7 +11,7 @@ from datetime import date, datetime, timedelta
 
 from sqlmodel import Session, select
 
-from mai_garden.models import Espece, Evenement, PlanteJardin, TypeEvenement
+from courgette.models import Espece, Evenement, PlanteJardin, TypeEvenement
 
 # Correspondance entre un type de tâche calendaire et le champ de mois de l'Espece.
 TACHES_CALENDAIRES = {

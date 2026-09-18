@@ -1,5 +1,5 @@
 [project]
-name = "mai-garden"
+name = "courgette"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
@@ -18,7 +18,7 @@ dependencies = [
 ]
 
 [project.scripts]
-jardin = "mai_garden.cli:app"
+courgette = "courgette.cli:app"
 
 [build-system]
 requires = ["uv_build>=0.12.9,<0.13.0"]

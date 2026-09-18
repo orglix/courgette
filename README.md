@@ -59,19 +59,19 @@ Les fonctionnalités à venir (météo, chatbot IA, identification par photo, ag
 
 ```bash
 # Creation base de donnée
-uv run jardin init-db
+uv run courgette init-db
 
 # Ajouter une espèce au référentiel
-uv run jardin espece ajouter
+uv run courgette espece ajouter
 
 # Lister les plantes de son jardin
-uv run jardin plante liste
+uv run courgette plante liste
 
 # Enregistrer un arrosage
-uv run jardin evenement ajouter
+uv run courgette evenement ajouter
 
 # Voir les rappels du jour
-uv run jardin rappel liste
+uv run courgette rappel liste
 ```
 
 *(Commandes indicatives — à ajuster une fois le CLI implémenté.)*

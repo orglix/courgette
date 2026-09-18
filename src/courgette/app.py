@@ -4,7 +4,7 @@ Espece reste géré en CLI (usage technique). Ici : consultation des especes
 (pour peupler un menu déroulant), gestion des plantes du jardin, et journal.
 
 Lancement :
-    uv run uvicorn mai_garden.app:app --reload
+    uv run uvicorn courgette.app:app --reload
 Puis ouvrir http://localhost:8000
 """
 
@@ -16,8 +16,8 @@ from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 from sqlmodel import Session, select
 
-from mai_garden.db import create_db_and_tables, get_session
-from mai_garden.models import (
+from courgette.db import create_db_and_tables, get_session
+from courgette.models import (
     Emplacement,
     Espece,
     Evenement,
@@ -26,7 +26,7 @@ from mai_garden.models import (
     TypeEvenement,
 )
 
-from mai_garden.rappels import taches_du_jour
+from courgette.rappels import taches_du_jour
  
 app = FastAPI(title="Jardin Assistant")
  

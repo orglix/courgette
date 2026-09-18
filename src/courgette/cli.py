@@ -13,8 +13,8 @@ from datetime import date, datetime
 import typer
 from sqlmodel import Session, select
 
-from mai_garden.db import create_db_and_tables, engine
-from mai_garden.models import (
+from courgette.db import create_db_and_tables, engine
+from courgette.models import (
     Emplacement,
     Espece,
     Evenement,
@@ -23,7 +23,7 @@ from mai_garden.models import (
     StatutPlante,
     TypeEvenement,
 )
-from mai_garden.rappels import taches_du_jour
+from courgette.rappels import taches_du_jour
 
 
 app = typer.Typer(help="Assistant de gestion du jardin.")
