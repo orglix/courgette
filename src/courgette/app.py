@@ -27,6 +27,7 @@ from courgette.models import (
 )
 
 from courgette.rappels import taches_du_jour
+from courgette.smart_todo import todays_smart_tasks
  
 app = FastAPI(title="Jardin Assistant")
  
@@ -151,7 +152,7 @@ def ajouter_evenement(
  
 @app.get("/api/todo")
 def todo_du_jour(session: Session = Depends(get_session)):
-    return taches_du_jour(session)
+    return todays_smart_tasks(session)
  
  
 # --------------------------------------------------------------------------- #

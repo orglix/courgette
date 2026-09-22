@@ -24,7 +24,7 @@ from courgette.models import (
     TypeEvenement,
 )
 from courgette.rappels import taches_du_jour
-
+from courgette.smart_todo import todays_smart_tasks
 
 app = typer.Typer(help="Assistant de gestion du jardin.")
 espece_app = typer.Typer(help="Gérer le référentiel d'espèces.")
@@ -223,7 +223,7 @@ def evenement_lister(plante_jardin_id: int):
 def rappel_aujourdhui():
     """Affiche les tâches dues aujourd'hui (arrosage + calendrier)."""
     with Session(engine) as session:
-        taches = taches_du_jour(session)
+        taches = todays_smart_tasks(session)
  
     if not taches:
         typer.echo("Rien à faire aujourd'hui.")
