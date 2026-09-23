@@ -26,8 +26,12 @@ from courgette.models import (
     TypeEvenement,
 )
 
-from courgette.rappels import taches_du_jour
-from courgette.smart_todo import todays_smart_tasks
+from courgette.smart_todo import todays_tasks
+from courgette import alertes
+from courgette import weather
+import logging
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
  
 app = FastAPI(title="Jardin Assistant")
  
@@ -152,7 +156,41 @@ def ajouter_evenement(
  
 @app.get("/api/todo")
 def todo_du_jour(session: Session = Depends(get_session)):
-    return todays_smart_tasks(session)
+    return todays_tasks(session)
+ 
+ 
+# --------------------------------------------------------------------------- #
+# API — alertes gel/canicule (jardin entier, pas liées à une plante précise)
+# --------------------------------------------------------------------------- #
+ 
+@app.get("/api/alertes")
+def alertes_meteo():
+    return alertes.get_alerts()
+ 
+ 
+# --------------------------------------------------------------------------- #
+# API — météo brute (debug)
+# --------------------------------------------------------------------------- #
+ 
+@app.get("/api/meteo")
+def meteo_debug():
+    """Raw weather data for troubleshooting: past 15 days + next 48h forecast.
+ 
+    Read-only — unlike the sync job (meteo_sync.synchroniser_meteo), this
+    never creates automatic watering events, so it's safe to refresh anytime.
+    """
+    jours = weather.get_weather(past_days=15, forecast_days=2)
+    aujourdhui = date.today()
+    return [
+        {
+            "date": j.day.isoformat(),
+            "precipitation_mm": j.precipitation_mm,
+            "temp_min_c": j.temp_min_c,
+            "temp_max_c": j.temp_max_c,
+            "periode": "passe" if j.day < aujourdhui else ("aujourdhui" if j.day == aujourdhui else "prevision"),
+        }
+        for j in jours
+    ]
  
  
 # --------------------------------------------------------------------------- #
@@ -163,3 +201,11 @@ def todo_du_jour(session: Session = Depends(get_session)):
 def page_accueil():
     chemin = Path(__file__).parent / "static" / "index.html"
     return chemin.read_text(encoding="utf-8")
+ 
+ 
+@app.get("/meteo", response_class=HTMLResponse)
+def page_meteo():
+    """Standalone debug page: raw weather data, separate from the main app page."""
+    chemin = Path(__file__).parent / "static" / "meteo.html"
+    return chemin.read_text(encoding="utf-8")
+ 

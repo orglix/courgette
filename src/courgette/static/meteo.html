@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>Debug météo</title>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 700px; margin: 2rem auto; padding: 0 1rem; color: #222; }
+  h1 { font-size: 1.4rem; }
+  table { width: 100%; border-collapse: collapse; margin-top: 1rem; }
+  th, td { text-align: left; padding: .4rem .6rem; border-bottom: 1px solid #eee; font-size: .9rem; }
+  th { color: #555; font-weight: 600; }
+  tr.aujourdhui { background: #fffbe6; }
+  tr.prevision { color: #666; font-style: italic; }
+  .badge { font-size: .75rem; padding: .1rem .4rem; border-radius: 4px; background: #eee; }
+  .rain { color: #0a63c9; font-weight: 600; }
+  #erreur { color: #b00; margin-top: 1rem; }
+</style>
+</head>
+<body>
+
+<h1>🌦️ Debug météo</h1>
+<p>Appel direct à l'API Open-Meteo (lecture seule — ne crée aucun événement d'arrosage automatique).</p>
+
+<table id="tableau">
+  <thead>
+    <tr><th>Date</th><th>Pluie (mm)</th><th>Temp. min</th><th>Temp. max</th><th></th></tr>
+  </thead>
+  <tbody id="corps-tableau">
+    <tr><td colspan="5">Chargement…</td></tr>
+  </tbody>
+</table>
+<div id="erreur"></div>
+
+<script>
+async function chargerMeteo() {
+  const corps = document.getElementById("corps-tableau");
+  const erreur = document.getElementById("erreur");
+  try {
+    const res = await fetch("/api/meteo");
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const jours = await res.json();
+
+    corps.innerHTML = jours.map(j => `
+      <tr class="${j.periode}">
+        <td>${j.date}</td>
+        <td class="${j.precipitation_mm >= 5 ? 'rain' : ''}">${j.precipitation_mm.toFixed(1)}</td>
+        <td>${j.temp_min_c.toFixed(1)}°C</td>
+        <td>${j.temp_max_c.toFixed(1)}°C</td>
+        <td><span class="badge">${j.periode}</span></td>
+      </tr>
+    `).join("");
+  } catch (e) {
+    corps.innerHTML = "";
+    erreur.textContent = "Erreur lors de l'appel météo : " + e.message +
+      " (vérifie LATITUDE/LONGITUDE dans .env)";
+  }
+}
+
+chargerMeteo();
+</script>
+</body>
+</html>

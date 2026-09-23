@@ -11,6 +11,7 @@ Usage :
 from datetime import date, datetime
 
 import typer
+import logging
 from sqlmodel import Session, select
 
 from courgette.db import create_db_and_tables, engine
@@ -23,18 +24,24 @@ from courgette.models import (
     StatutPlante,
     TypeEvenement,
 )
-from courgette.rappels import taches_du_jour
-from courgette.smart_todo import todays_smart_tasks
+# from courgette.rappels import taches_du_jour
+from courgette.smart_todo import todays_tasks
+from courgette.meteo_sync import synchroniser_meteo
 
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+ 
 app = typer.Typer(help="Assistant de gestion du jardin.")
 espece_app = typer.Typer(help="Gérer le référentiel d'espèces.")
 plante_app = typer.Typer(help="Gérer les plantes de ton jardin.")
 evenement_app = typer.Typer(help="Gérer le journal d'événements (arrosage, taille, récolte...).")
 rappel_app = typer.Typer(help="Voir les tâches dues.")
+meteo_app = typer.Typer(help="Synchronisation météo.")
 app.add_typer(espece_app, name="espece")
 app.add_typer(plante_app, name="plante")
 app.add_typer(evenement_app, name="evenement")
 app.add_typer(rappel_app, name="rappel")
+app.add_typer(meteo_app, name="meteo")
  
  
 def _parse_mois(valeur: str | None) -> list[int]:
@@ -223,7 +230,7 @@ def evenement_lister(plante_jardin_id: int):
 def rappel_aujourdhui():
     """Affiche les tâches dues aujourd'hui (arrosage + calendrier)."""
     with Session(engine) as session:
-        taches = todays_smart_tasks(session)
+        taches = todays_tasks(session)
  
     if not taches:
         typer.echo("Rien à faire aujourd'hui.")
@@ -236,6 +243,20 @@ def rappel_aujourdhui():
         )
  
  
+# --------------------------------------------------------------------------- #
+# Météo
+# --------------------------------------------------------------------------- #
+ 
+@meteo_app.command("sync")
+def meteo_sync_command():
+    """Récupère la météo manquante et crée les arrosages automatiques (pluie).
+ 
+    À lancer une fois par jour (ex. via le planificateur de tâches Windows).
+    """
+    with Session(engine) as session:
+        jours = synchroniser_meteo(session)
+    typer.echo(f"Synchro météo terminée ({len(jours)} jours récupérés).")
+ 
+ 
 if __name__ == "__main__":
     app()
- 

@@ -22,45 +22,33 @@ from courgette.models import TypeEvenement
 logger = logging.getLogger(__name__)
 
 
-def todays_smart_tasks(session: Session, today: date | None = None) -> list[dict]:
+logger = logging.getLogger(__name__)
+ 
+RAIN_THRESHOLD_MM = 5.0  # same threshold as meteo_sync.py, kept consistent
+ 
+ 
+def todays_tasks(session: Session, today: date | None = None) -> list[dict]:
+    """Returns today's tasks, dropping outdoor watering tasks if significant
+    rain is forecast today. Fails safe: any weather/config issue just returns
+    the unfiltered schedule rather than blocking the todo list.
+    """
     today = today or date.today()
-    all_tasks = rappels.taches_du_jour(session, today)
-
-    watering_tasks = [t for t in all_tasks if t["type"] == TypeEvenement.ARROSAGE.value]
-    other_tasks = [t for t in all_tasks if t["type"] != TypeEvenement.ARROSAGE.value]
-
-    if not watering_tasks:
-        return all_tasks
-
+    tasks = rappels.taches_du_jour(session, today)
+ 
     try:
-        forecast = weather.get_weather()
+        forecast = weather.get_weather(past_days=0, forecast_days=1)
+        rain_today_mm = weather.rainfall_expected_today_mm(forecast, today)
     except RuntimeError as exc:
         logger.warning("Weather unavailable, keeping watering tasks as-is: %s", exc)
-        return all_tasks
-
-    weather_summary = {
-        "recent_rainfall_mm": weather.recent_rainfall_mm(forecast, today),
-        "rainfall_expected_today_mm": weather.rainfall_expected_today_mm(forecast, today),
-    }
-
-    try:
-        decisions = {
-            d.plante_jardin_id: d for d in llm.decide_watering(watering_tasks, weather_summary)
-        }
-    except Exception as exc:  # noqa: BLE001 — any LLM/parsing failure should fail safe, not crash the todo list
-        logger.warning("LLM watering decision failed, keeping watering tasks as-is: %s", exc)
-        return all_tasks
-
-    kept_watering_tasks = []
-    for task in watering_tasks:
-        decision = decisions.get(task["plante_jardin_id"])
-        if decision is None or decision.keep:
-            kept_watering_tasks.append(task)
-        else:
-            logger.info(
-                "Skipping watering for plante_jardin_id=%s: %s",
-                task["plante_jardin_id"],
-                decision.reason,
-            )
-
-    return other_tasks + kept_watering_tasks
+        return tasks
+ 
+    if rain_today_mm < RAIN_THRESHOLD_MM:
+        return tasks
+ 
+    logger.info("Rain forecast today (%.1fmm): skipping outdoor watering tasks.", rain_today_mm)
+    return [
+        t
+        for t in tasks
+        if not (t["type"] == TypeEvenement.ARROSAGE.value and t["emplacement"] == Emplacement.EXTERIEUR.value)
+    ]
+ 
