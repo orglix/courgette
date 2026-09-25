@@ -15,6 +15,7 @@ from sqlalchemy import ARRAY, Integer
 from sqlmodel import Column, Field, Relationship, SQLModel
 
 
+
 # --------------------------------------------------------------------------- #
 # Enums
 # --------------------------------------------------------------------------- #
@@ -28,10 +29,17 @@ class Exposition(str, Enum):
 class Emplacement(str, Enum):
     INTERIEUR = "interieur"
     EXTERIEUR = "exterieur"
+    SERRE = "serre"
+ 
+ 
+class Contenant(str, Enum):
+    POT = "pot"
+    PLEINE_TERRE = "pleine_terre"
  
  
 class StatutPlante(str, Enum):
     SEMIS = "semis"
+    BOUTURE = "bouture"
     CROISSANCE = "croissance"
     RECOLTE = "recolte"
     TERMINEE = "terminee"
@@ -41,6 +49,7 @@ class TypeEvenement(str, Enum):
     ARROSAGE = "arrosage"
     SEMIS = "semis"
     PLANTATION = "plantation"
+    BOUTURAGE = "bouturage"
     TAILLE = "taille"
     TRAITEMENT = "traitement"
     RECOLTE = "recolte"
@@ -112,13 +121,30 @@ class PlanteJardin(SQLModel, table=True):
  
     espece_id: int = Field(foreign_key="espece.id", index=True)
     emplacement: Emplacement
+    contenant: Contenant = Field(default=Contenant.PLEINE_TERRE)
     zone: str | None = Field(default=None, description="Ex. 'potager nord', 'salon'.")
     date_plantation: date | None = Field(default=None, description="None si la date exacte est inconnue.")
     quantite: int = Field(default=1, ge=1, description="Nombre de pieds plantés ensemble.")
     statut: StatutPlante = Field(default=StatutPlante.SEMIS)
+    frequence_arrosage_jours_override: int | None = Field(
+        default=None,
+        description=(
+            "Remplace la fréquence d'arrosage de l'espèce pour cette plante précise "
+            "(ex. une bouture en pot n'a pas les mêmes besoins que sa plante mère en pleine terre). "
+            "None = utiliser la valeur de l'espèce."
+        ),
+    )
+    plante_parent_id: int | None = Field(
+        default=None,
+        foreign_key="plantejardin.id",
+        description="Plante d'origine si cette plante est issue d'une bouture/division.",
+    )
  
     espece: Espece = Relationship(back_populates="plantes")
-    evenements: list["Evenement"] = Relationship(back_populates="plante_jardin")
+    evenements: list["Evenement"] = Relationship(
+        back_populates="plante_jardin",
+        sa_relationship_kwargs={"foreign_keys": "[Evenement.plante_jardin_id]"},
+    )
     rappels: list["Rappel"] = Relationship(back_populates="plante_jardin")
  
  
@@ -135,8 +161,16 @@ class Evenement(SQLModel, table=True):
     type: TypeEvenement
     date: datetime = Field(default_factory=datetime.utcnow)
     note: str | None = None
+    plante_creee_id: int | None = Field(
+        default=None,
+        foreign_key="plantejardin.id",
+        description="Si cet événement a créé une nouvelle plante (bouturage), l'id de cette nouvelle PlanteJardin.",
+    )
  
-    plante_jardin: PlanteJardin = Relationship(back_populates="evenements")
+    plante_jardin: PlanteJardin = Relationship(
+        back_populates="evenements",
+        sa_relationship_kwargs={"foreign_keys": "[Evenement.plante_jardin_id]"},
+    )
  
  
 # --------------------------------------------------------------------------- #

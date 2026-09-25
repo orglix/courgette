@@ -29,6 +29,8 @@ from courgette.smart_todo import todays_tasks
 from courgette.meteo_sync import synchroniser_meteo
 
 
+
+
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
  
 app = typer.Typer(help="Assistant de gestion du jardin.")
@@ -117,6 +119,7 @@ def espece_lister():
 def plante_ajouter(
     espece_id: int,
     emplacement: Emplacement = typer.Option(Emplacement.EXTERIEUR),
+    contenant: Contenant = typer.Option(Contenant.PLEINE_TERRE),
     zone: str = typer.Option(None, help="Ex. 'potager nord', 'salon'."),
     date_plantation: str = typer.Option(None, help="Format AAAA-MM-JJ. Omis si date inconnue."),
     quantite: int = typer.Option(1, help="Nombre de pieds plantés ensemble."),
@@ -132,6 +135,7 @@ def plante_ajouter(
         plante = PlanteJardin(
             espece_id=espece_id,
             emplacement=emplacement,
+            contenant=contenant,
             zone=zone,
             date_plantation=date.fromisoformat(date_plantation) if date_plantation else None,
             quantite=quantite,
@@ -142,7 +146,7 @@ def plante_ajouter(
         session.refresh(plante)
         nom_espece = espece.nom
  
-    typer.echo(f"Plante ajoutée (id={plante.id}) — {quantite}x {nom_espece} en {emplacement.value}.")
+    typer.echo(f"Plante ajoutée (id={plante.id}) — {quantite}x {nom_espece} en {emplacement.value} ({contenant.value}).")
  
  
 @plante_app.command("lister")
@@ -156,11 +160,99 @@ def plante_lister():
         for p in plantes:
             espece = session.get(Espece, p.espece_id)
             date_affichee = p.date_plantation if p.date_plantation else "date inconnue"
+            lignee = f" (issue de la plante {p.plante_parent_id})" if p.plante_parent_id else ""
             typer.echo(
-                f"[{p.id}] {p.quantite}x {espece.nom if espece else '?'} — {p.emplacement.value} "
+                f"[{p.id}] {p.quantite}x {espece.nom if espece else '?'} — {p.emplacement.value}/{p.contenant.value} "
                 f"({p.zone or 'zone non précisée'}) — planté le {date_affichee} "
-                f"— statut: {p.statut.value}"
+                f"— statut: {p.statut.value}{lignee}"
             )
+ 
+ 
+@plante_app.command("bouturer")
+def plante_bouturer(
+    parent_id: int,
+    emplacement: Emplacement = typer.Option(Emplacement.INTERIEUR, help="Emplacement pendant l'enracinement."),
+    contenant: Contenant = typer.Option(Contenant.POT, help="Une bouture est presque toujours mise en pot au départ."),
+    zone: str = typer.Option(None),
+    frequence_arrosage_jours_override: int = typer.Option(
+        None, help="Fréquence d'arrosage spécifique à cette bouture, si différente de l'espèce."
+    ),
+    note: str = typer.Option(None, help="Ex. 'tige de 10cm, nœud sous l'eau'."),
+):
+    """Prend une bouture d'une plante existante.
+ 
+    Crée une nouvelle PlanteJardin (statut 'bouture'), liée à la plante mère,
+    et enregistre l'événement de bouturage sur la plante mère elle-même.
+    """
+    with Session(engine) as session:
+        parent = session.get(PlanteJardin, parent_id)
+        if parent is None:
+            typer.echo(f"Aucune plante avec l'id {parent_id}. Utilise 'plante lister' pour voir les id valides.")
+            raise typer.Exit(code=1)
+ 
+        enfant = PlanteJardin(
+            espece_id=parent.espece_id,
+            emplacement=emplacement,
+            contenant=contenant,
+            zone=zone,
+            statut=StatutPlante.BOUTURE,
+            quantite=1,
+            frequence_arrosage_jours_override=frequence_arrosage_jours_override,
+            plante_parent_id=parent.id,
+        )
+        session.add(enfant)
+        session.commit()
+        session.refresh(enfant)
+        enfant_id = enfant.id  # capturé avant le 2e commit, qui va expirer l'objet
+ 
+        session.add(
+            Evenement(
+                plante_jardin_id=parent.id,
+                type=TypeEvenement.BOUTURAGE,
+                plante_creee_id=enfant_id,
+                note=note,
+            )
+        )
+        session.commit()
+ 
+    typer.echo(f"Bouture créée (plante id={enfant_id}), issue de la plante {parent_id}.")
+ 
+ 
+@plante_app.command("modifier")
+def plante_modifier(
+    plante_id: int,
+    statut: StatutPlante = typer.Option(None, help="Ex. passer de 'bouture' à 'croissance' après plantation finale."),
+    emplacement: Emplacement = typer.Option(None),
+    contenant: Contenant = typer.Option(None),
+    zone: str = typer.Option(None),
+    frequence_arrosage_jours_override: int = typer.Option(None),
+):
+    """Met à jour le statut/emplacement/contenant d'une plante existante.
+ 
+    Ne crée aucun nouvel enregistrement — c'est un changement d'état sur la
+    même plante (contrairement à 'bouturer', qui en crée une nouvelle).
+    """
+    with Session(engine) as session:
+        plante = session.get(PlanteJardin, plante_id)
+        if plante is None:
+            typer.echo(f"Aucune plante avec l'id {plante_id}.")
+            raise typer.Exit(code=1)
+ 
+        if statut is not None:
+            plante.statut = statut
+        if emplacement is not None:
+            plante.emplacement = emplacement
+        if contenant is not None:
+            plante.contenant = contenant
+        if zone is not None:
+            plante.zone = zone
+        if frequence_arrosage_jours_override is not None:
+            plante.frequence_arrosage_jours_override = frequence_arrosage_jours_override
+ 
+        session.add(plante)
+        session.commit()
+ 
+    typer.echo(f"Plante {plante_id} mise à jour.")
  
  
 # --------------------------------------------------------------------------- #
@@ -260,3 +352,4 @@ def meteo_sync_command():
  
 if __name__ == "__main__":
     app()
+ 

@@ -150,6 +150,7 @@ async function chargerPlantes() {
         <span class="msg" id="msg-evenement-${p.id}"></span>
       </form>
       <button type="button" onclick="toggleHistorique(${p.id})">Historique</button>
+      <a href="/plante/${p.id}" style="margin-left:.5rem; font-size:.9rem;">Voir la fiche →</a>
       <div class="historique" id="historique-${p.id}" style="display:none"></div>
     </div>
   `).join("");

@@ -18,6 +18,7 @@ from sqlmodel import Session, select
 
 from courgette.db import create_db_and_tables, get_session
 from courgette.models import (
+    Contenant,
     Emplacement,
     Espece,
     Evenement,
@@ -27,12 +28,11 @@ from courgette.models import (
 )
 
 from courgette.smart_todo import todays_tasks
-from courgette import alertes
-from courgette import weather
+from courgette import alertes, fiche_plante, weather, rappels
 import logging
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
- 
+
 app = FastAPI(title="Jardin Assistant")
  
  
@@ -48,10 +48,29 @@ def on_startup() -> None:
 class NouvellePlante(BaseModel):
     espece_id: int
     emplacement: Emplacement
+    contenant: Contenant = Contenant.PLEINE_TERRE
     zone: str | None = None
     date_plantation: date | None = None
     quantite: int = 1
     statut: StatutPlante = StatutPlante.SEMIS
+ 
+ 
+class ModificationPlante(BaseModel):
+    """Tous les champs sont optionnels : seuls ceux fournis sont modifiés."""
+ 
+    statut: StatutPlante | None = None
+    emplacement: Emplacement | None = None
+    contenant: Contenant | None = None
+    zone: str | None = None
+    frequence_arrosage_jours_override: int | None = None
+ 
+ 
+class NouvelleBouture(BaseModel):
+    emplacement: Emplacement = Emplacement.INTERIEUR
+    contenant: Contenant = Contenant.POT
+    zone: str | None = None
+    frequence_arrosage_jours_override: int | None = None
+    note: str | None = None
  
  
 class NouvelEvenement(BaseModel):
@@ -84,6 +103,7 @@ def lister_plantes(session: Session = Depends(get_session)):
                 "id": p.id,
                 "espece_nom": espece.nom if espece else "?",
                 "emplacement": p.emplacement.value,
+                "contenant": p.contenant.value,
                 "zone": p.zone,
                 "date_plantation": p.date_plantation.isoformat() if p.date_plantation else None,
                 "quantite": p.quantite,
@@ -102,6 +122,7 @@ def ajouter_plante(payload: NouvellePlante, session: Session = Depends(get_sessi
     plante = PlanteJardin(
         espece_id=payload.espece_id,
         emplacement=payload.emplacement,
+        contenant=payload.contenant,
         zone=payload.zone,
         date_plantation=payload.date_plantation,
         quantite=payload.quantite,
@@ -111,6 +132,96 @@ def ajouter_plante(payload: NouvellePlante, session: Session = Depends(get_sessi
     session.commit()
     session.refresh(plante)
     return {"id": plante.id}
+ 
+ 
+@app.patch("/api/plantes/{plante_id}")
+def modifier_plante(
+    plante_id: int, payload: ModificationPlante, session: Session = Depends(get_session)
+):
+    """Change l'état d'une plante existante (ex. bouture -> croissance après
+    plantation finale). Ne crée rien — contrairement à /bouturer.
+    """
+    plante = session.get(PlanteJardin, plante_id)
+    if plante is None:
+        raise HTTPException(status_code=404, detail="Plante introuvable.")
+ 
+    updates = payload.model_dump(exclude_unset=True)
+    for champ, valeur in updates.items():
+        setattr(plante, champ, valeur)
+ 
+    session.add(plante)
+    session.commit()
+    return {"id": plante.id}
+ 
+ 
+@app.post("/api/plantes/{plante_id}/bouturer")
+def bouturer_plante(
+    plante_id: int, payload: NouvelleBouture, session: Session = Depends(get_session)
+):
+    """Prend une bouture : crée une nouvelle PlanteJardin (statut 'bouture')
+    liée à la plante mère, et enregistre l'événement sur la plante mère.
+    """
+    parent = session.get(PlanteJardin, plante_id)
+    if parent is None:
+        raise HTTPException(status_code=404, detail="Plante introuvable.")
+ 
+    enfant = PlanteJardin(
+        espece_id=parent.espece_id,
+        emplacement=payload.emplacement,
+        contenant=payload.contenant,
+        zone=payload.zone,
+        statut=StatutPlante.BOUTURE,
+        quantite=1,
+        frequence_arrosage_jours_override=payload.frequence_arrosage_jours_override,
+        plante_parent_id=parent.id,
+    )
+    session.add(enfant)
+    session.commit()
+    session.refresh(enfant)
+    enfant_id = enfant.id
+ 
+    session.add(
+        Evenement(
+            plante_jardin_id=parent.id,
+            type=TypeEvenement.BOUTURAGE,
+            plante_creee_id=enfant_id,
+            note=payload.note,
+        )
+    )
+    session.commit()
+    return {"id": enfant_id}
+ 
+ 
+@app.get("/api/plantes/{plante_id}/detail")
+def detail_plante(plante_id: int, session: Session = Depends(get_session)):
+    """Full identity card for one plant: current state, watering status,
+    lineage (bouture), and the species fiche (Trefle/Wikipedia).
+    """
+    plante = session.get(PlanteJardin, plante_id)
+    if plante is None:
+        raise HTTPException(status_code=404, detail="Plante introuvable.")
+ 
+    espece = session.get(Espece, plante.espece_id)
+    arrosage = rappels.prochaine_echeance_arrosage(session, plante)
+ 
+    enfants = session.exec(
+        select(PlanteJardin).where(PlanteJardin.plante_parent_id == plante_id)
+    ).all()
+ 
+    return {
+        "id": plante.id,
+        "espece_nom": espece.nom if espece else "?",
+        "emplacement": plante.emplacement.value,
+        "contenant": plante.contenant.value,
+        "zone": plante.zone,
+        "quantite": plante.quantite,
+        "statut": plante.statut.value,
+        "date_plantation": plante.date_plantation.isoformat() if plante.date_plantation else None,
+        "plante_parent_id": plante.plante_parent_id,
+        "boutures_filles": [e.id for e in enfants],
+        "arrosage": arrosage,
+        "fiche_espece": fiche_plante.get_fiche(espece.nom) if espece else None,
+    }
  
  
 # --------------------------------------------------------------------------- #
@@ -209,3 +320,9 @@ def page_meteo():
     chemin = Path(__file__).parent / "static" / "meteo.html"
     return chemin.read_text(encoding="utf-8")
  
+ 
+@app.get("/plante/{plante_id}", response_class=HTMLResponse)
+def page_plante(plante_id: int):
+    """Per-plant identity card page. The id is read client-side from the URL."""
+    chemin = Path(__file__).parent / "static" / "plante.html"
+    return chemin.read_text(encoding="utf-8")
